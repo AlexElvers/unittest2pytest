@@ -106,17 +106,15 @@ def SequenceEqual(left, right, kws):
 def AlmostOp(places_op, delta_op, first, second, kws):
     first.prefix =  ""
     second.prefix = ""
-    abs_op = Call(Name('abs'),
-                  [Node(syms.factor, [first, Name('-'), second])])
+
+    approx_args = [second]
     if kws.get('delta', None) is not None:
-        # delta
-        return CompOp(delta_op, abs_op, kws['delta'], {})
-    else:
-        # `7` is the default in unittest.TestCase.asserAlmostEqual
-        places = kws['places'] or Number(7)
-        places.prefix = " "
-        round_op = Call(Name('round'), (abs_op, Comma(), places))
-        return CompOp(places_op, round_op, Number(0), {})
+        kws['delta'].prefix = ""
+        abs_arg = KeywordArg(Name('abs'), kws['delta'])
+        abs_arg.prefix = " "
+        approx_args.extend([Comma(), abs_arg])
+    approx_op = Call(Name("pytest.approx"), approx_args)
+    return CompOp(places_op, first, approx_op, {})
 
 
 def RaisesOp(context, exceptionClass, indent, kws, arglist, node):
@@ -158,6 +156,7 @@ def RaisesOp(context, exceptionClass, indent, kws, arglist, node):
 
 def RaisesRegexOp(context, designator, exceptionClass, expected_regex,
                   indent, kws, arglist, node):
+    expected_regex.prefix = ""
     arglist = [a.clone() for a in arglist.children]
     del arglist[2:4] # remove pattern and comma
     arglist = Node(syms.arglist, arglist)
@@ -175,14 +174,14 @@ def RaisesRegexOp(context, designator, exceptionClass, expected_regex,
         i = leaf.parent.children.index(leaf)
         leaf.parent.insert_child(i + 1, Newline())
         leaf.parent.insert_child(i + 2,
-                                 Name('assert re.search(pattern, %s.value)' %
-                                      designator, prefix=indent))
+                                 Name('assert %s.match(%s)' % (designator, expected_regex),
+                                      prefix=indent))
         return with_stmt
     else:
         return Node(syms.suite,
                     [with_stmt,
                      Newline(),
-                     Name('assert re.search(pattern, %s.value)' % designator,
+                     Name('assert %s.match(%s)' % (designator, expected_regex),
                           prefix=indent)
                      ])
 
@@ -437,7 +436,7 @@ class FixSelfAssert(BaseFix):
         n_stmt.prefix = node.prefix
 
         # add necessary imports
-        if 'Raises' in method or 'Warns' in method:
+        if 'Raises' in method or 'Warns' in method or 'Almost' in method:
             add_import('pytest', node)
         if 'Regex' in method:
             add_import('re', node)
